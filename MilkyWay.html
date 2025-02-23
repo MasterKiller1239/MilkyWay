@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Rotating Solar System with Asteroid Belt</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+        }
+        #container {
+            position: relative;
+            height: 100%;
+            width: 100%;
+        }
+        canvas {
+            background: #000;
+            display: block;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+        }
+        .sidebar {
+            height: 100%;
+            width: 0;
+            position: fixed;
+            z-index: 2;
+            top: 0;
+            right: 0;
+            background-color: #111;
+            overflow-x: hidden;
+            transition: 0.5s;
+            padding-top: 20px;
+            color: white;
+        }
+        .sidebar .control-group {
+            padding: 8px 8px 8px 32px;
+            margin-bottom: 10px;
+        }
+        .sidebar .control-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .sidebar .control-group input[type="range"] {
+            width: 100%;
+        }
+        .sidebar .description {
+            font-size: 0.8em;
+            color: #999;
+            margin-top: 5px;
+        }
+        .toggle-btn {
+            position: fixed;
+            top: 50%;
+            right: 0;
+            transform: translateY(-50%);
+            font-size: 20px;
+            cursor: pointer;
+            background-color: #333;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px 0 0 5px;
+            transition: background-color 0.3s;
+            z-index: 3;
+        }
+        .toggle-btn:hover {
+            background-color: #555;
+        }
+        .button-group {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 3;
+        }
+        .button-group button {
+            background-color: #333;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-right: 10px;
+            transition: background-color 0.3s;
+        }
+        .button-group button:hover {
+            background-color: #555;
+        }
+    </style>
+    <!-- Podłączenie gif.js z CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js"></script>
+</head>
+<body>
+    <div id="container">
+        <canvas id="solarSystem"></canvas>
+        <div id="sidebar" class="sidebar">
+            <div class="control-group">
+                <label for="asteroidCount">Asteroid Count: <span id="asteroidCountValue">100</span></label>
+                <input type="range" id="asteroidCount" min="0" max="500" value="100">
+                <div class="description">Controls the number of asteroids in the asteroid belt (0-500)</div>
+            </div>
+            <div id="planetControls"></div>
+        </div>
+        <button class="toggle-btn" onclick="toggleSidebar()">☰</button>
+        <div class="button-group">
+            <button id="pauseBtn">Pause</button>
+            <button id="playBtn">Play</button>
+            <button id="gifBtn">Create GIF</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('solarSystem');
+        const ctx = canvas.getContext('2d');
+        let hoveredPlanet = null;
+        let isPaused = false;
+        let animationFrameId = null;
+        let capturing = false;
+        let gif = null;
+        let frameCount = 0;
+        const maxFrames = 150; // Maksymalna liczba klatek w GIF-ie
+
+        // Dostosowanie rozmiaru canvasu do ekranu z zachowaniem proporcji 16:9
+        function resizeCanvas() {
+            const aspectRatio = 16 / 9;
+            let width = window.innerWidth;
+            let height = window.innerHeight;
+            
+            if (width / height > aspectRatio) {
+                width = height * aspectRatio;
+            } else {
+                height = width / aspectRatio;
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+            canvas.style.width = `${width}px`;
+            canvas.style.height = `${height}px`;
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        const planets = [
+            { name: "Mercury", orbit: 50, size: 4, color: "#808080", baseSpeed: 4.15, wiki: "https://en.wikipedia.org/wiki/Mercury_(planet)" },
+            { name: "Venus", orbit: 80, size: 6, color: "#FFD700", baseSpeed: 1.62, wiki: "https://en.wikipedia.org/wiki/Venus" },
+            { name: "Earth", orbit: 110, size: 6, color: "#4169E1", baseSpeed: 1, wiki: "https://en.wikipedia.org/wiki/Earth" },
+            { name: "Mars", orbit: 140, size: 5, color: "#FF4500", baseSpeed: 0.53, wiki: "https://en.wikipedia.org/wiki/Mars" },
+            { name: "Jupiter", orbit: 200, size: 12, color: "#FFA500", baseSpeed: 0.08, wiki: "https://en.wikipedia.org/wiki/Jupiter" },
+            { name: "Saturn", orbit: 250, size: 10, color: "#DEB887", baseSpeed: 0.03, wiki: "https://en.wikipedia.org/wiki/Saturn" },
+            { name: "Uranus", orbit: 300, size: 8, color: "#00CED1", baseSpeed: 0.01, wiki: "https://en.wikipedia.org/wiki/Uranus" },
+            { name: "Neptune", orbit: 340, size: 8, color: "#0000FF", baseSpeed: 0.006, wiki: "https://en.wikipedia.org/wiki/Neptune" }
+        ];
+
+        let angles = planets.map(() => Math.random() * Math.PI * 2);
+        let speedMultipliers = planets.map(() => 1);
+        
+        let asteroidCount = 100;
+        let asteroidBeltRadius = 170;
+        let asteroidBeltWidth = 20;
+        let asteroids = generateAsteroids(asteroidCount);
+
+        // Tworzenie kontrolek dla planet
+        const planetControls = document.getElementById('planetControls');
+        planets.forEach((planet, index) => {
+            const div = document.createElement('div');
+            div.className = 'control-group';
+            div.innerHTML = `
+                <label for="speed${planet.name}">${planet.name} Speed: 
+                    <span id="speedValue${planet.name}">1.0</span>x</label>
+                <input type="range" id="speed${planet.name}" 
+                    min="0" max="5" step="0.1" value="1">
+                <div class="description">Adjusts ${planet.name}'s orbital speed (0-5x base speed)</div>
+            `;
+            planetControls.appendChild(div);
+            
+            document.getElementById(`speed${planet.name}`).addEventListener('input', (e) => {
+                speedMultipliers[index] = parseFloat(e.target.value);
+                document.getElementById(`speedValue${planet.name}`).textContent = 
+                    speedMultipliers[index].toFixed(1);
+            });
+        });
+
+        // Kontrolka ilości asteroidów
+        const asteroidCountInput = document.getElementById('asteroidCount');
+        asteroidCountInput.addEventListener('input', (e) => {
+            asteroidCount = parseInt(e.target.value);
+            document.getElementById('asteroidCountValue').textContent = asteroidCount;
+            asteroids = generateAsteroids(asteroidCount);
+        });
+
+        // Przyciski pauzy, odtwarzania i GIF
+        const pauseBtn = document.getElementById('pauseBtn');
+        const playBtn = document.getElementById('playBtn');
+        const gifBtn = document.getElementById('gifBtn');
+
+        pauseBtn.addEventListener('click', () => {
+            isPaused = true;
+            cancelAnimationFrame(animationFrameId);
+        });
+
+        playBtn.addEventListener('click', () => {
+            if (isPaused) {
+                isPaused = false;
+                animate();
+            }
+        });
+
+        gifBtn.addEventListener('click', () => {
+    if (capturing) {
+        return; // Uniemożliwia wielokrotne rozpoczęcie przechwytywania
+    }
+
+    capturing = true;
+    frameCount = 0;
+    gif = new GIF({
+        workers: 2,
+        quality: 10,
+        width: canvas.width,
+        height: canvas.height
+    });
+
+    gif.on('finished', function(blob) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'solar_system.gif';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        capturing = false; // Odblokowuje możliwość ponownego tworzenia GIF-a
+        gifBtn.textContent = 'Create GIF';
+    });
+
+    gifBtn.textContent = 'Capturing...';
+});
+
+
+        function generateAsteroids(count) {
+            return Array(count).fill().map(() => {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = asteroidBeltRadius + (Math.random() - 0.5) * asteroidBeltWidth;
+                return {
+                    angle: angle,
+                    radius: radius,
+                    size: Math.random() * 1 + 0.5,
+                    speed: 0.5 + Math.random() * 0.5
+                };
+            });
+        }
+
+        function drawOrbit(orbitRadius) {
+            ctx.beginPath();
+            ctx.arc(canvas.width / 2, canvas.height / 2, orbitRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.stroke();
+        }
+
+        function drawPlanet(planet, angle) {
+            const scale = canvas.width / 1920;
+            const x = canvas.width / 2 + Math.cos(angle) * planet.orbit * scale;
+            const y = canvas.height / 2 + Math.sin(angle) * planet.orbit * scale;
+            ctx.beginPath();
+            ctx.arc(x, y, planet.size * scale, 0, Math.PI * 2);
+            ctx.fillStyle = planet.color;
+            ctx.fill();
+
+            if (planet.name === "Saturn") {
+                ctx.beginPath();
+                ctx.ellipse(x, y, planet.size * 2 * scale, planet.size * 0.3 * scale, 0, 0, Math.PI * 2);
+                ctx.strokeStyle = "#D2B48C";
+                ctx.stroke();
+            }
+
+            return { x, y, radius: planet.size * scale };
+        }
+
+        function drawAsteroid(asteroid) {
+            const scale = canvas.width / 1920;
+            const x = canvas.width / 2 + Math.cos(asteroid.angle) * asteroid.radius * scale;
+            const y = canvas.height / 2 + Math.sin(asteroid.angle) * asteroid.radius * scale;
+            ctx.beginPath();
+            ctx.arc(x, y, asteroid.size * scale, 0, Math.PI * 2);
+            ctx.fillStyle = "#808080";
+            ctx.fill();
+        }
+
+        function drawSun() {
+            const scale = canvas.width / 1920;
+            ctx.beginPath();
+            ctx.arc(canvas.width / 2, canvas.height / 2, 20 * scale, 0, Math.PI * 2);
+            ctx.fillStyle = "#FFFF00";
+            ctx.fill();
+        }
+
+        function drawTooltip(planet, x, y) {
+            const scale = canvas.width / 1920;
+            ctx.font = `${16 * scale}px Arial`;
+            ctx.fillStyle = "white";
+            ctx.textAlign = "center";
+            ctx.fillText(planet.name, x, y - planet.size * scale - 10 * scale);
+        }
+
+        // Wykrywanie najechania i kliknięcia
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            hoveredPlanet = null;
+
+            planets.forEach((planet, index) => {
+                const { x, y, radius } = drawPlanet(planet, angles[index]);
+                const distance = Math.sqrt((mouseX - x) ** 2 + (mouseY - y) ** 2);
+                if (distance <= radius) {
+                    hoveredPlanet = planet;
+                }
+            });
+            renderFrame();
+        });
+
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            planets.forEach((planet, index) => {
+                const { x, y, radius } = drawPlanet(planet, angles[index]);
+                const distance = Math.sqrt((mouseX - x) ** 2 + (mouseY - y) ** 2);
+                if (distance <= radius) {
+                    window.open(planet.wiki, '_blank');
+                }
+            });
+        });
+
+        function renderFrame() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            drawSun();
+            planets.forEach((planet, index) => {
+                drawOrbit(planet.orbit * (canvas.width / 1920));
+                drawPlanet(planet, angles[index]);
+            });
+
+            asteroids.forEach(asteroid => {
+                drawAsteroid(asteroid);
+            });
+
+            if (hoveredPlanet) {
+                const scale = canvas.width / 1920;
+                const x = canvas.width / 2 + Math.cos(angles[planets.indexOf(hoveredPlanet)]) * hoveredPlanet.orbit * scale;
+                const y = canvas.height / 2 + Math.sin(angles[planets.indexOf(hoveredPlanet)]) * hoveredPlanet.orbit * scale;
+                drawTooltip(hoveredPlanet, x, y);
+            }
+
+            if (capturing && frameCount < maxFrames) {
+                gif.addFrame(ctx, { copy: true, delay: 100 });
+                frameCount++;
+                if (frameCount >= maxFrames) {
+                    capturing = false;
+                    gif.render();
+                    gifBtn.textContent = 'Create GIF';
+                }
+            }
+        }
+
+        function animate() {
+            renderFrame();
+
+            if (!isPaused) {
+                planets.forEach((planet, index) => {
+                    angles[index] += planet.baseSpeed * speedMultipliers[index] * 0.01;
+                });
+
+                asteroids.forEach(asteroid => {
+                    asteroid.angle += asteroid.speed * 0.01;
+                    if (asteroid.angle > Math.PI * 2) {
+                        asteroid.angle -= Math.PI * 2;
+                    }
+                });
+
+                animationFrameId = requestAnimationFrame(animate);
+            }
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar.style.width === '300px') {
+                sidebar.style.width = '0';
+            } else {
+                sidebar.style.width = '300px';
+            }
+        }
+
+        animate();
+    </script>
+</body>
+</html>
